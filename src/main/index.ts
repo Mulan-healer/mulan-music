@@ -21,7 +21,7 @@ function createWindow(): BrowserWindow {
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
-      webSecurity: false // Temporarily disable for local file access troubleshooting
+      webSecurity: true
     }
   })
 
@@ -103,17 +103,59 @@ app.whenReady().then(() => {
     desktopLyricsWindow?.setIgnoreMouseEvents(ignore, { forward: true })
   })
 
-  protocol.handle('atom', (request) => {
+  protocol.handle('atom', async (request) => {
     try {
       const url = new URL(request.url)
       let filePath = decodeURIComponent(url.pathname)
       
-      // On Windows, the pathname starts with a slash (e.g., "/C:/path/to/file")
-      if (process.platform === 'win32' && filePath.startsWith('/')) {
-        filePath = filePath.slice(1)
+      // On Windows, pathname starts with /C:/... so we need to remove the leading /
+      if (process.platform === 'win32') {
+        // Check if it starts with / and a drive letter (e.g. /C:)
+        if (filePath.match(/^\/[a-zA-Z]:/)) {
+          filePath = filePath.slice(1)
+        }
       }
       
-      return net.fetch(pathToFileURL(filePath).toString())
+      const stats = await fs.promises.stat(filePath)
+      const range = request.headers.get('Range')
+      
+      const ext = path.extname(filePath).toLowerCase()
+      const mimeTypes: Record<string, string> = {
+        '.mp3': 'audio/mpeg',
+        '.m4a': 'audio/mp4',
+        '.flac': 'audio/flac',
+        '.wav': 'audio/wav',
+        '.ogg': 'audio/ogg'
+      }
+      const contentType = mimeTypes[ext] || 'audio/mpeg'
+      
+      if (range) {
+        const parts = range.replace(/bytes=/, "").split("-")
+        const start = parseInt(parts[0], 10)
+        const end = parts[1] ? parseInt(parts[1], 10) : stats.size - 1
+        const chunksize = (end - start) + 1
+        
+        const stream = fs.createReadStream(filePath, { start, end })
+        
+        return new Response(stream as any, {
+          status: 206,
+          statusText: 'Partial Content',
+          headers: {
+            'Content-Range': `bytes ${start}-${end}/${stats.size}`,
+            'Accept-Ranges': 'bytes',
+            'Content-Length': chunksize.toString(),
+            'Content-Type': contentType,
+          }
+        })
+      } else {
+        const stream = fs.createReadStream(filePath)
+        return new Response(stream as any, {
+          headers: {
+            'Content-Length': stats.size.toString(),
+            'Content-Type': contentType,
+          }
+        })
+      }
     } catch (error) {
       console.error('Protocol error:', error)
       return new Response('Error loading resource', { status: 500 })
@@ -161,123 +203,158 @@ app.whenReady().then(() => {
   })
 
   ipcMain.handle('get-songs', async (event, folderPath: string) => {
-      const mm = await import('music-metadata')
-      const cachePath = path.join(app.getPath('userData'), 'songs_cache_v2.json')
-      let cache: Record<string, any> = {}
-      
-      try {
-        if (fs.existsSync(cachePath)) {
-          cache = JSON.parse(fs.readFileSync(cachePath, 'utf-8'))
-        }
-      } catch (e) {
-        console.error('Failed to load songs cache:', e)
+    const mm = await import('music-metadata')
+    // Changed cache version to v4 to force re-scan for lyrics and external lrc files
+    const cachePath = path.join(app.getPath('userData'), 'songs_cache_v4.json')
+    let cache: Record<string, any> = {}
+    
+    try {
+      if (fs.existsSync(cachePath)) {
+        cache = JSON.parse(fs.readFileSync(cachePath, 'utf-8'))
       }
+    } catch (e) {
+      console.error('Failed to load songs cache:', e)
+    }
 
-      const fileList: { path: string, mtime: number }[] = []
+    const CHUNK_SIZE = 50
+    let processedCount = 0
+    let totalFiles = 0
+    let currentChunk: any[] = []
 
-      const getFileList = (dir: string) => {
-        const files = fs.readdirSync(dir)
-        for (const file of files) {
-          const filePath = path.join(dir, file)
-          const stats = fs.statSync(filePath)
-          if (stats.isDirectory()) {
-            getFileList(filePath)
-          } else if (
-            file.endsWith('.mp3') ||
-            file.endsWith('.m4a') ||
-            file.endsWith('.flac') ||
-            file.endsWith('.wav')
-          ) {
-            fileList.push({ path: filePath, mtime: stats.mtimeMs })
+    const processFile = async (filePath: string, stats: fs.Stats) => {
+      const cachedSong = cache[filePath]
+      let songData: any
+
+      if (cachedSong && cachedSong.mtime === stats.mtimeMs) {
+        songData = cachedSong.data
+      } else {
+        try {
+          // Parse with default options
+          const metadata = await mm.parseFile(filePath)
+          
+          let lyrics = null
+          
+          // 1. Try standard common lyrics (most reliable)
+          if (metadata.common.lyrics && metadata.common.lyrics.length > 0) {
+            const lyricEntry = metadata.common.lyrics[0]
+            lyrics = typeof lyricEntry === 'string' ? lyricEntry : (lyricEntry as any).text
+          } 
+          
+          // 2. Fallback: Check native ID3v2 tags directly
+          if (!lyrics && metadata.native) {
+            const id3Tags = (metadata.native as any)['ID3v2.3'] || (metadata.native as any)['ID3v2.4'] || []
+            
+            // Search for USLT (Unsynchronized lyrics)
+            const uslt = id3Tags.find((t: any) => t.id === 'USLT')
+            if (uslt && uslt.value && uslt.value.text) {
+              lyrics = uslt.value.text
+            }
+
+            // Search for SYLT (Synchronized lyrics) - rare but possible fallback
+            if (!lyrics) {
+               const sylt = id3Tags.find((t: any) => t.id === 'SYLT')
+               if (sylt && sylt.value && sylt.value.text) {
+                 lyrics = sylt.value.text
+               }
+            }
           }
-        }
-      }
 
-      getFileList(folderPath)
-
-      const totalFiles = fileList.length
-      let processedCount = 0
-      const CHUNK_SIZE = 50
-      let currentChunk: any[] = []
-
-      // Concurrency limit for parsing
-      const CONCURRENCY = 15
-      const chunks = []
-      for (let i = 0; i < fileList.length; i += CONCURRENCY) {
-        chunks.push(fileList.slice(i, i + CONCURRENCY))
-      }
-
-      for (const chunk of chunks) {
-        await Promise.all(chunk.map(async (file) => {
-          const cachedSong = cache[file.path]
-          let songData: any
-
-          if (cachedSong && cachedSong.mtime === file.mtime) {
-            songData = cachedSong.data
-          } else {
-            try {
-              const metadata = await mm.parseFile(file.path)
-              
-              let lyrics = null
-              if (metadata.common.lyrics && metadata.common.lyrics.length > 0) {
-                const lyricEntry = metadata.common.lyrics[0]
-                lyrics = typeof lyricEntry === 'string' ? lyricEntry : (lyricEntry as any).text
-              } else if ((metadata.native as any)['ID3v2.3'] || (metadata.native as any)['ID3v2.4']) {
-                const native = (metadata.native as any)['ID3v2.3'] || (metadata.native as any)['ID3v2.4']
-                const uslt = native?.find((t: any) => t.id === 'USLT')
-                if (uslt) lyrics = uslt.value.text
-              }
-
-              songData = {
-                id: file.path,
-                path: file.path,
-                title: metadata.common.title || path.basename(file.path),
-                artist: metadata.common.artist || 'Unknown Artist',
-                album: metadata.common.album || 'Unknown Album',
-                duration: metadata.format.duration,
-                lyrics: lyrics,
-                hasCover: !!metadata.common.picture // Just a flag
-              }
-
-              cache[file.path] = {
-                mtime: file.mtime,
-                data: songData
-              }
-            } catch (error) {
-              songData = {
-                id: file.path,
-                path: file.path,
-                title: path.basename(file.path),
-                artist: 'Unknown Artist',
-                album: 'Unknown Album',
-                duration: 0
+          // 3. Fallback: Look for external .lrc file
+          if (!lyrics) {
+            const lrcPath = filePath.replace(/\.[^.]+$/, '.lrc')
+            if (fs.existsSync(lrcPath)) {
+              try {
+                lyrics = fs.readFileSync(lrcPath, 'utf-8')
+              } catch (e) {
+                console.error('Failed to read external lrc file:', e)
               }
             }
           }
 
-          currentChunk.push(songData)
-          processedCount++
-
-          if (currentChunk.length >= CHUNK_SIZE || processedCount === totalFiles) {
-            event.sender.send('songs-data-chunk', {
-              songs: currentChunk,
-              isComplete: processedCount === totalFiles,
-              progress: Math.floor((processedCount / totalFiles) * 100)
-            })
-            currentChunk = []
+          songData = {
+            id: filePath,
+            path: filePath,
+            title: metadata.common.title || path.basename(filePath),
+            artist: metadata.common.artist || 'Unknown Artist',
+            album: metadata.common.album || 'Unknown Album',
+            duration: metadata.format.duration,
+            lyrics: lyrics,
+            hasCover: !!metadata.common.picture
           }
-        }))
+
+          cache[filePath] = {
+            mtime: stats.mtimeMs,
+            data: songData
+          }
+        } catch (error) {
+          songData = {
+            id: filePath,
+            path: filePath,
+            title: path.basename(filePath),
+            artist: 'Unknown Artist',
+            album: 'Unknown Album',
+            duration: 0
+          }
+        }
       }
 
-      // Save updated cache (without covers)
-      try {
-        fs.writeFileSync(cachePath, JSON.stringify(cache))
-      } catch (e) {
-        console.error('Failed to save songs cache:', e)
-      }
+      currentChunk.push(songData)
+      processedCount++
 
-      return { total: totalFiles } // Handled via events now
-    })
+      if (currentChunk.length >= CHUNK_SIZE) {
+        event.sender.send('songs-data-chunk', {
+          songs: currentChunk,
+          isComplete: false,
+          progress: totalFiles > 0 ? Math.floor((processedCount / totalFiles) * 100) : 0
+        })
+        currentChunk = []
+      }
+    }
+
+    const scanDirectory = async (dir: string) => {
+      const entries = await fs.promises.readdir(dir, { withFileTypes: true })
+      
+      const tasks = entries.map(async (entry) => {
+        const fullPath = path.join(dir, entry.name)
+        if (entry.isDirectory()) {
+          await scanDirectory(fullPath)
+        } else if (
+          entry.name.endsWith('.mp3') ||
+          entry.name.endsWith('.m4a') ||
+          entry.name.endsWith('.flac') ||
+          entry.name.endsWith('.wav')
+        ) {
+          totalFiles++
+          const stats = await fs.promises.stat(fullPath)
+          await processFile(fullPath, stats)
+        }
+      })
+      
+      await Promise.all(tasks)
+    }
+
+    // First pass to get total count (optional but helpful for progress)
+    // For now, we'll just scan and send
+    await scanDirectory(folderPath)
+
+    // Send final chunk
+    if (currentChunk.length > 0 || processedCount === totalFiles) {
+      event.sender.send('songs-data-chunk', {
+        songs: currentChunk,
+        isComplete: true,
+        progress: 100
+      })
+    }
+
+    // Save updated cache
+    try {
+      fs.writeFileSync(cachePath, JSON.stringify(cache))
+    } catch (e) {
+      console.error('Failed to save songs cache:', e)
+    }
+
+    return { total: processedCount }
+  })
 
   ipcMain.handle('get-song-cover', async (_, filePath: string) => {
     try {

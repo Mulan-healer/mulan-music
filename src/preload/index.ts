@@ -7,6 +7,7 @@ const api = {
   getSongs: (folderPath: string) => ipcRenderer.invoke('get-songs', folderPath),
   getLastFolder: () => ipcRenderer.invoke('get-last-folder'),
   getSongCover: (filePath: string) => ipcRenderer.invoke('get-song-cover', filePath),
+  updateLyrics: (data: any) => ipcRenderer.send('update-lyrics', data),
   onSongsDataChunk: (callback: (data: any) => void) => {
     ipcRenderer.on('songs-data-chunk', (_, data) => callback(data))
     return () => ipcRenderer.removeAllListeners('songs-data-chunk')

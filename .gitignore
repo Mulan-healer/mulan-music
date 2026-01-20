@@ -18,6 +18,8 @@ out
 !.vscode/extensions.json
 .idea
 .DS_Store
+.gemini
+.shared
 *.suo
 *.ntvs*
 *.njsproj

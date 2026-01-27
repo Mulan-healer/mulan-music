@@ -10,8 +10,8 @@ export default {
         background: '#09090B',
         surface: '#18181B',
         primary: {
-          DEFAULT: '#EC4899',
-          dark: '#8B5CF6',
+          DEFAULT: '#38BDF8',
+          dark: '#818CF8',
         }
       },
       fontFamily: {
@@ -30,8 +30,8 @@ export default {
           '50%': { transform: 'translateY(-10px)' },
         },
         glow: {
-          'from': { 'box-shadow': '0 0 10px #EC4899, 0 0 20px #EC4899' },
-          'to': { 'box-shadow': '0 0 20px #8B5CF6, 0 0 40px #8B5CF6' }
+          'from': { 'box-shadow': '0 0 10px #38BDF8, 0 0 20px #38BDF8' },
+          'to': { 'box-shadow': '0 0 20px #818CF8, 0 0 40px #818CF8' }
         }
       },
       backdropBlur: {

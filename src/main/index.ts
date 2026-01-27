@@ -205,7 +205,19 @@ app.whenReady().then(() => {
   ipcMain.handle('get-songs', async (event, folderPath: string) => {
     const mm = await import('music-metadata')
     // Changed cache version to v4 to force re-scan for lyrics and external lrc files
-    const cachePath = path.join(app.getPath('userData'), 'songs_cache_v4.json')
+    // Use project root cache folder if available (requested by user), otherwise fallback to userData
+    const localCacheDir = path.join(process.cwd(), 'cache')
+    let cachePath = path.join(app.getPath('userData'), 'songs_cache_v4.json')
+    
+    try {
+      if (fs.existsSync(localCacheDir)) {
+        cachePath = path.join(localCacheDir, 'songs_cache_v4.json')
+        console.log('Using local cache path:', cachePath)
+      }
+    } catch (e) {
+      console.error('Failed to check local cache dir:', e)
+    }
+
     let cache: Record<string, any> = {}
     
     try {

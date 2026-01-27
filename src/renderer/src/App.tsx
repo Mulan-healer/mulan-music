@@ -43,13 +43,13 @@ function NavItem({ icon, label, active = false, onClick }: { icon: React.ReactNo
     >
       <div className={cn(
         "transition-colors",
-        active ? "text-pink-500" : "text-inherit"
+        active ? "text-primary" : "text-inherit"
       )}>
         {icon}
       </div>
       <span>{label}</span>
       {active && (
-        <div className="ml-auto w-1.5 h-1.5 rounded-full bg-pink-500 shadow-[0_0_10px_#EC4899]" />
+        <div className="ml-auto w-1.5 h-1.5 rounded-full bg-primary shadow-[0_0_10px_#38BDF8]" />
       )}
     </button>
   )
@@ -89,12 +89,21 @@ export default function App() {
   const [lyricFontSize, setLyricFontSize] = useState(48)
   const [lyricAlign, setLyricAlign] = useState<'center' | 'left'>('left')
   const [showTranslation, setShowTranslation] = useState(true)
+  const [visibleArtistsCount, setVisibleArtistsCount] = useState(50)
   
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const lyricsContainerRef = useRef<HTMLDivElement | null>(null)
   const activeLyricRef = useRef<HTMLParagraphElement | null>(null)
+  const loadMoreRef = useRef<HTMLDivElement>(null)
 
   const [isLoadingCovers, setIsLoadingCovers] = useState(false)
+
+  // Reset visible count when view or search changes
+  useEffect(() => {
+    setVisibleArtistsCount(50)
+  }, [view, searchQuery])
+
+
 
   useEffect(() => {
     const removeListener = (window as any).api.onSongsDataChunk((data: { songs: Song[], isComplete: boolean, progress: number }) => {
@@ -263,6 +272,23 @@ export default function App() {
       .sort((a, b) => a.name.localeCompare(b.name))
   }, [songs, searchQuery])
 
+  // Intersection Observer for infinite scroll
+  useEffect(() => {
+    if (view !== 'artists' || selectedArtist) return
+
+    const observer = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting) {
+        setVisibleArtistsCount(prev => prev + 50)
+      }
+    }, { rootMargin: '200px' })
+
+    if (loadMoreRef.current) {
+      observer.observe(loadMoreRef.current)
+    }
+
+    return () => observer.disconnect()
+  }, [view, selectedArtist, artists.length, loadMoreRef.current])
+
   const artistSongs = useMemo(() => {
     if (!selectedArtist) return []
     const songsByArtist = songs.filter(s => s.artist === selectedArtist)
@@ -424,7 +450,7 @@ export default function App() {
         <aside className="w-64 flex flex-col m-4 mr-0 glass-panel rounded-2xl overflow-hidden transition-all duration-500">
           <div className="p-6 flex flex-col h-full">
             <div className="flex items-center gap-3 mb-10 px-2">
-              <div className="w-10 h-10 bg-gradient-to-br from-pink-500 to-violet-600 rounded-xl flex items-center justify-center shadow-lg shadow-pink-500/20 animate-float">
+              <div className="w-10 h-10 bg-gradient-to-br from-primary to-primary-dark rounded-xl flex items-center justify-center shadow-lg shadow-primary/20 animate-float">
                 <Music2 size={24} className="text-white" />
               </div>
               <span className="font-outfit font-bold text-2xl tracking-tight text-gradient">Mulan</span>
@@ -492,13 +518,13 @@ export default function App() {
         <main className="flex-1 flex flex-col min-w-0 relative">
           <header className="h-20 flex items-center justify-between px-8">
             <div className="relative w-96 group">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20 group-focus-within:text-pink-500 transition-colors" size={18} />
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20 group-focus-within:text-primary transition-colors" size={18} />
               <input 
                 type="text" 
                 placeholder="Search your library..." 
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-white/5 border border-white/5 rounded-2xl py-2.5 pl-12 pr-4 text-sm focus:bg-white/10 focus:border-pink-500/50 focus:ring-0 transition-all outline-none backdrop-blur-md"
+                className="w-full bg-white/5 border border-white/5 rounded-2xl py-2.5 pl-12 pr-4 text-sm focus:bg-white/10 focus:border-primary/50 focus:ring-0 transition-all outline-none backdrop-blur-md"
               />
             </div>
             
@@ -562,7 +588,7 @@ export default function App() {
                       onClick={() => setShowTranslation(!showTranslation)}
                       className={cn(
                         "w-full py-3 rounded-xl transition-all text-sm font-bold flex items-center justify-center",
-                        showTranslation ? "bg-pink-500 text-white shadow-lg shadow-pink-500/30" : "hover:bg-white/10 text-white/40"
+                        showTranslation ? "bg-primary text-white shadow-lg shadow-primary/30" : "hover:bg-white/10 text-white/40"
                       )}
                     >
                       译
@@ -632,7 +658,7 @@ export default function App() {
                                 {line.text}
                               </span>
                               {i === currentLyricIndex && (
-                                <span className="absolute -left-8 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-pink-500 shadow-[0_0_20px_#EC4899] animate-pulse" />
+                                <span className="absolute -left-8 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-primary shadow-[0_0_20px_#38BDF8] animate-pulse" />
                               )}
                             </p>
                             {showTranslation && line.translation && (
@@ -661,150 +687,36 @@ export default function App() {
             )}
 
             <div className={cn("py-8", showLyrics && "hidden")}>
-                {view === 'songs' && !selectedArtist && (
-                  <>
-                    <h2 className="text-4xl font-outfit font-black mb-8 text-gradient">Songs</h2>
-                    <div className="glass-panel rounded-3xl overflow-hidden border border-white/5">
-                      {isScanning && songs.length === 0 ? (
-                        <div className="p-6 space-y-4">
-                          {[...Array(8)].map((_, i) => (
-                            <div key={i} className="flex items-center gap-4">
-                              <Skeleton className="w-6 h-4" />
-                              <Skeleton className="w-12 h-12 rounded-xl" />
-                              <div className="flex-1 space-y-2">
-                                <Skeleton className="w-1/3 h-4" />
-                                <Skeleton className="w-1/4 h-3" />
-                              </div>
-                              <Skeleton className="w-24 h-4" />
-                              <Skeleton className="w-12 h-4" />
+                <div className={cn(view !== 'songs' && "hidden")}>
+                  <h2 className="text-4xl font-outfit font-black mb-8 text-gradient">Songs</h2>
+                  <div className="glass-panel rounded-3xl overflow-hidden border border-white/5">
+                    {isScanning && songs.length === 0 ? (
+                      <div className="p-6 space-y-4">
+                        {[...Array(8)].map((_, i) => (
+                          <div key={i} className="flex items-center gap-4">
+                            <Skeleton className="w-6 h-4" />
+                            <Skeleton className="w-12 h-12 rounded-xl" />
+                            <div className="flex-1 space-y-2">
+                              <Skeleton className="w-1/3 h-4" />
+                              <Skeleton className="w-1/4 h-3" />
                             </div>
-                          ))}
-                        </div>
-                      ) : songs.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center h-96 text-white/10">
-                          <Music2 size={80} className="mb-6 opacity-20" />
-                          <p className="text-xl font-medium">Your library is empty</p>
-                          <button 
-                            onClick={handleSelectFolder}
-                            className="mt-6 px-6 py-2.5 bg-white/5 hover:bg-white/10 rounded-xl text-white/60 text-sm font-bold transition-all border border-white/5"
-                          >
-                            Select Music Folder
-                          </button>
-                        </div>
-                      ) : (
-                        <table className="w-full text-left border-collapse">
-                          <thead>
-                            <tr className="border-b border-white/5 text-[10px] font-bold text-white/20 uppercase tracking-[0.2em]">
-                              <th className="py-4 px-6 font-medium w-16">#</th>
-                              <th className="py-4 px-6 font-medium">Title</th>
-                              <th className="py-4 px-6 font-medium">Album</th>
-                              <th className="py-4 px-6 font-medium w-20"><ListMusic size={14} /></th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {filteredSongs.map((song, index) => (
-                              <tr 
-                                key={song.id} 
-                                onClick={() => playSong(song)}
-                                className={cn(
-                                  "group cursor-pointer transition-all duration-300",
-                                  currentSong?.id === song.id ? "bg-white/5" : "hover:bg-white/[0.02]"
-                                )}
-                              >
-                                <td className="py-4 px-6 text-white/20 font-mono text-xs w-16">
-                                  {currentSong?.id === song.id && isPlaying ? (
-                                    <div className="flex items-end gap-0.5 h-3">
-                                      <div className="w-0.5 bg-pink-500 animate-[music-bar_0.6s_ease-in-out_infinite]" />
-                                      <div className="w-0.5 bg-pink-500 animate-[music-bar_0.8s_ease-in-out_infinite]" />
-                                      <div className="w-0.5 bg-pink-500 animate-[music-bar_0.5s_ease-in-out_infinite]" />
-                                    </div>
-                                  ) : index + 1}
-                                </td>
-                                <td className="py-4 px-6">
-                                  <div className="flex items-center gap-4">
-                                    <div className="w-12 h-12 rounded-xl overflow-hidden shadow-lg border border-white/5 flex-shrink-0 group-hover:scale-110 transition-transform">
-                                      {song.cover ? (
-                                        <img src={song.cover} alt="" className="w-full h-full object-cover" />
-                                      ) : (
-                                        <div className="w-full h-full bg-white/5 flex items-center justify-center">
-                                          <Music2 size={20} className="text-white/10" />
-                                        </div>
-                                      )}
-                                    </div>
-                                    <div className="min-w-0">
-                                      <div className={cn(
-                                        "font-bold truncate transition-colors",
-                                        currentSong?.id === song.id ? "text-pink-500" : "text-white/90"
-                                      )}>
-                                        {song.title}
-                                      </div>
-                                      <div className="text-xs text-white/30 truncate mt-0.5 hover:text-white/60 transition-colors">{song.artist}</div>
-                                    </div>
-                                  </div>
-                                </td>
-                                <td className="py-4 px-6 text-sm text-white/30 truncate max-w-[200px] font-medium">{song.album}</td>
-                                <td className="py-4 px-6 text-xs text-white/20 font-mono">{formatTime(song.duration)}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      )}
-                    </div>
-                  </>
-                )}
-
-                {view === 'artists' && !selectedArtist && (
-                  <>
-                    <h2 className="text-4xl font-outfit font-black mb-8 text-gradient">Artists</h2>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-8">
-                      {isScanning && artists.length === 0 ? (
-                        [...Array(12)].map((_, i) => (
-                          <div key={i} className="space-y-4">
-                            <Skeleton className="aspect-square rounded-[2rem]" />
-                            <Skeleton className="w-2/3 h-5" />
-                            <Skeleton className="w-1/3 h-3" />
+                            <Skeleton className="w-24 h-4" />
+                            <Skeleton className="w-12 h-4" />
                           </div>
-                        ))
-                      ) : artists.map(artist => (
-                        <div 
-                          key={artist.name}
-                          onClick={() => {
-                            setSelectedArtist(artist.name)
-                            setView('artists')
-                          }}
-                          className="group cursor-pointer"
+                        ))}
+                      </div>
+                    ) : songs.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center h-96 text-white/10">
+                        <Music2 size={80} className="mb-6 opacity-20" />
+                        <p className="text-xl font-medium">Your library is empty</p>
+                        <button 
+                          onClick={handleSelectFolder}
+                          className="mt-6 px-6 py-2.5 bg-white/5 hover:bg-white/10 rounded-xl text-white/60 text-sm font-bold transition-all border border-white/5"
                         >
-                          <div className="aspect-square rounded-[2rem] overflow-hidden mb-4 shadow-2xl transition-all duration-500 group-hover:-translate-y-2 group-hover:shadow-pink-500/10 border border-white/5">
-                            {artist.cover ? (
-                              <img src={artist.cover} alt="" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" />
-                            ) : (
-                              <div className="w-full h-full bg-white/5 flex items-center justify-center">
-                                <Users size={40} className="text-white/10" />
-                              </div>
-                            )}
-                          </div>
-                          <div className="px-2">
-                            <div className="font-bold text-white/90 group-hover:text-pink-500 transition-colors truncate">{artist.name}</div>
-                            <div className="text-xs text-white/30 mt-1">{artist.songCount} songs</div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
-
-                {view === 'artists' && selectedArtist && (
-                  <>
-                    <div className="flex items-center gap-6 mb-12">
-                      <button 
-                        onClick={() => setSelectedArtist(null)}
-                        className="p-3 rounded-2xl bg-white/5 hover:bg-white/10 transition-all border border-white/5 group"
-                      >
-                        <ChevronLeft size={24} className="group-hover:-translate-x-1 transition-transform" />
-                      </button>
-                      <h2 className="text-5xl font-outfit font-black text-gradient">{selectedArtist}</h2>
-                    </div>
-                    <div className="glass-panel rounded-3xl overflow-hidden border border-white/5">
+                          Select Music Folder
+                        </button>
+                      </div>
+                    ) : (
                       <table className="w-full text-left border-collapse">
                         <thead>
                           <tr className="border-b border-white/5 text-[10px] font-bold text-white/20 uppercase tracking-[0.2em]">
@@ -815,7 +727,7 @@ export default function App() {
                           </tr>
                         </thead>
                         <tbody>
-                          {artistSongs.map((song, index) => (
+                          {filteredSongs.map((song, index) => (
                             <tr 
                               key={song.id} 
                               onClick={() => playSong(song)}
@@ -827,9 +739,9 @@ export default function App() {
                               <td className="py-4 px-6 text-white/20 font-mono text-xs w-16">
                                 {currentSong?.id === song.id && isPlaying ? (
                                   <div className="flex items-end gap-0.5 h-3">
-                                    <div className="w-0.5 bg-pink-500 animate-[music-bar_0.6s_ease-in-out_infinite]" />
-                                    <div className="w-0.5 bg-pink-500 animate-[music-bar_0.8s_ease-in-out_infinite]" />
-                                    <div className="w-0.5 bg-pink-500 animate-[music-bar_0.5s_ease-in-out_infinite]" />
+                                    <div className="w-0.5 bg-primary animate-[music-bar_0.6s_ease-in-out_infinite]" />
+                                    <div className="w-0.5 bg-primary animate-[music-bar_0.8s_ease-in-out_infinite]" />
+                                    <div className="w-0.5 bg-primary animate-[music-bar_0.5s_ease-in-out_infinite]" />
                                   </div>
                                 ) : index + 1}
                               </td>
@@ -847,11 +759,11 @@ export default function App() {
                                   <div className="min-w-0">
                                     <div className={cn(
                                       "font-bold truncate transition-colors",
-                                      currentSong?.id === song.id ? "text-pink-500" : "text-white/90"
+                                      currentSong?.id === song.id ? "text-primary" : "text-white/90"
                                     )}>
                                       {song.title}
                                     </div>
-                                    <div className="text-xs text-white/30 truncate mt-0.5">{song.artist}</div>
+                                    <div className="text-xs text-white/30 truncate mt-0.5 hover:text-white/60 transition-colors">{song.artist}</div>
                                   </div>
                                 </div>
                               </td>
@@ -861,9 +773,131 @@ export default function App() {
                           ))}
                         </tbody>
                       </table>
+                    )}
+                  </div>
+                </div>
+
+                <div className={cn(view !== 'artists' && "hidden")}>
+                  <>
+                    <div className={cn(selectedArtist && "hidden")}>
+                      <h2 className="text-4xl font-outfit font-black mb-8 text-gradient">Artists</h2>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-8">
+                        {isScanning && artists.length === 0 ? (
+                          [...Array(12)].map((_, i) => (
+                            <div key={i} className="space-y-4">
+                              <Skeleton className="aspect-square rounded-[2rem]" />
+                              <Skeleton className="w-2/3 h-5" />
+                              <Skeleton className="w-1/3 h-3" />
+                            </div>
+                          ))
+                        ) : (
+                          <>
+                            {artists.slice(0, visibleArtistsCount).map(artist => (
+                              <div 
+                                key={artist.name}
+                                onClick={() => {
+                                  setSelectedArtist(artist.name)
+                                  setView('artists')
+                                }}
+                                className="group cursor-pointer"
+                              >
+                                <div className="aspect-square rounded-[2rem] overflow-hidden mb-4 shadow-2xl transition-all duration-500 group-hover:-translate-y-2 group-hover:shadow-primary/10 border border-white/5">
+                                  {artist.cover ? (
+                                    <img src={artist.cover} alt="" loading="lazy" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" />
+                                  ) : (
+                                    <div className="w-full h-full bg-white/5 flex items-center justify-center">
+                                      <Users size={40} className="text-white/10" />
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="px-2">
+                                  <div className="font-bold text-white/90 group-hover:text-primary transition-colors truncate">{artist.name}</div>
+                                  <div className="text-xs text-white/30 mt-1">{artist.songCount} songs</div>
+                                </div>
+                              </div>
+                            ))}
+                          </>
+                        )}
+                      </div>
+                      {/* Sentinel element for infinite scroll */}
+                      {!isScanning && visibleArtistsCount < artists.length && (
+                        <div ref={loadMoreRef} className="h-20 w-full flex items-center justify-center">
+                          <div className="w-6 h-6 border-2 border-white/20 border-t-primary rounded-full animate-spin" />
+                        </div>
+                      )}
+                    </div>
+
+                    <div className={cn(!selectedArtist && "hidden")}>
+                      <div className="flex items-center gap-6 mb-12">
+                        <button 
+                          onClick={() => setSelectedArtist(null)}
+                          className="p-3 rounded-2xl bg-white/5 hover:bg-white/10 transition-all border border-white/5 group"
+                        >
+                          <ChevronLeft size={24} className="group-hover:-translate-x-1 transition-transform" />
+                        </button>
+                        <h2 className="text-5xl font-outfit font-black text-gradient">{selectedArtist}</h2>
+                      </div>
+                      <div className="glass-panel rounded-3xl overflow-hidden border border-white/5">
+                        <table className="w-full text-left border-collapse">
+                          <thead>
+                            <tr className="border-b border-white/5 text-[10px] font-bold text-white/20 uppercase tracking-[0.2em]">
+                              <th className="py-4 px-6 font-medium w-16">#</th>
+                              <th className="py-4 px-6 font-medium">Title</th>
+                              <th className="py-4 px-6 font-medium">Album</th>
+                              <th className="py-4 px-6 font-medium w-20"><ListMusic size={14} /></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {artistSongs.map((song, index) => (
+                              <tr 
+                                key={song.id} 
+                                onClick={() => playSong(song)}
+                                className={cn(
+                                  "group cursor-pointer transition-all duration-300",
+                                  currentSong?.id === song.id ? "bg-white/5" : "hover:bg-white/[0.02]"
+                                )}
+                              >
+                                <td className="py-4 px-6 text-white/20 font-mono text-xs w-16">
+                                  {currentSong?.id === song.id && isPlaying ? (
+                                    <div className="flex items-end gap-0.5 h-3">
+                                      <div className="w-0.5 bg-primary animate-[music-bar_0.6s_ease-in-out_infinite]" />
+                                      <div className="w-0.5 bg-primary animate-[music-bar_0.8s_ease-in-out_infinite]" />
+                                      <div className="w-0.5 bg-primary animate-[music-bar_0.5s_ease-in-out_infinite]" />
+                                    </div>
+                                  ) : index + 1}
+                                </td>
+                                <td className="py-4 px-6">
+                                  <div className="flex items-center gap-4">
+                                    <div className="w-12 h-12 rounded-xl overflow-hidden shadow-lg border border-white/5 flex-shrink-0 group-hover:scale-110 transition-transform">
+                                      {song.cover ? (
+                                        <img src={song.cover} alt="" className="w-full h-full object-cover" />
+                                      ) : (
+                                        <div className="w-full h-full bg-white/5 flex items-center justify-center">
+                                          <Music2 size={20} className="text-white/10" />
+                                        </div>
+                                      )}
+                                    </div>
+                                    <div className="min-w-0">
+                                      <div className={cn(
+                                        "font-bold truncate transition-colors",
+                                        currentSong?.id === song.id ? "text-primary" : "text-white/90"
+                                      )}>
+                                        {song.title}
+                                      </div>
+                                      <div className="text-xs text-white/30 truncate mt-0.5">{song.artist}</div>
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="py-4 px-6 text-sm text-white/30 truncate max-w-[200px] font-medium">{song.album}</td>
+                                <td className="py-4 px-6 text-xs text-white/20 font-mono">{formatTime(song.duration)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   </>
-                )}
+                </div>
             </div>
           </div>
 
@@ -889,7 +923,7 @@ export default function App() {
                   )}
                 </div>
                 <div className="min-w-0">
-                  <div className="font-bold text-[15px] truncate hover:text-pink-500 transition-colors cursor-pointer" onClick={() => setShowLyrics(true)}>
+                  <div className="font-bold text-[15px] truncate hover:text-primary transition-colors cursor-pointer" onClick={() => setShowLyrics(true)}>
                     {currentSong.title}
                   </div>
                   <div className="text-xs text-white/30 font-bold truncate hover:text-white/50 transition-colors cursor-pointer">{currentSong.artist}</div>
@@ -943,7 +977,7 @@ export default function App() {
               <div className="flex-1 relative h-6 flex items-center group/seek">
                 <div className="absolute inset-0 h-1 bg-white/5 rounded-full my-auto" />
                 <div 
-                  className="absolute inset-y-0 h-1 bg-gradient-to-r from-pink-500 to-violet-500 rounded-full my-auto shadow-[0_0_10px_rgba(236,72,153,0.3)]"
+                  className="absolute inset-y-0 h-1 bg-gradient-to-r from-primary to-primary-dark rounded-full my-auto shadow-[0_0_10px_rgba(56,189,248,0.3)]"
                   style={{ width: `${progress}%` }}
                 />
                 <input 
@@ -970,7 +1004,7 @@ export default function App() {
               onClick={() => setShowLyrics(!showLyrics)}
               className={cn(
                 "p-3 rounded-2xl transition-all",
-                showLyrics ? "bg-pink-500 text-white shadow-lg shadow-pink-500/20" : "text-white/20 hover:bg-white/5 hover:text-white"
+                showLyrics ? "bg-primary text-white shadow-lg shadow-primary/20" : "text-white/20 hover:bg-white/5 hover:text-white"
               )}
             >
               <Mic2 size={20} />

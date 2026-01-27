@@ -46,6 +46,30 @@ export const LyricsParser = {
     // Sort by time
     result.sort((a, b) => a.time - b.time)
 
-    return result
+    // Merge translation lines
+    const mergedResult: LyricLine[] = []
+    
+    // Check if we have potential translations (duplicate timestamps with different text)
+    for (let i = 0; i < result.length; i++) {
+      const current = result[i]
+      
+      // Look ahead for the same timestamp or very close timestamp (within 0.1s)
+      if (i < result.length - 1) {
+        const next = result[i + 1]
+        
+        // If timestamps are essentially the same
+        if (Math.abs(next.time - current.time) < 0.1) {
+          // Simplest strategy: first line is original, second is translation
+          current.translation = next.text
+          mergedResult.push(current)
+          i++ // Skip next line as we merged it
+          continue
+        }
+      }
+      
+      mergedResult.push(current)
+    }
+
+    return mergedResult
   }
 }
